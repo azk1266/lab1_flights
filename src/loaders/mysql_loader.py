@@ -12,7 +12,15 @@ from ..utils.logging_config import get_logger, ETLProgressLogger
 
 
 class MySQLLoader:
-    """Handles loading data into MySQL database tables."""
+    """Handles loading data into MySQL database tables.
+    
+    This class focuses purely on data loading operations including:
+    - Loading dimensional data with smart duplicate handling
+    - Loading fact table data in batches
+    - Data integrity validation
+    
+    Note: Database schema and index creation is handled externally.
+    """
     
     def __init__(self):
         """Initialize the MySQL loader."""
@@ -62,68 +70,8 @@ class MySQLLoader:
             self.engine.dispose()
             self.logger.info("Database connection closed")
     
-    def execute_sql_file(self, sql_file_path: str) -> bool:
-        """Execute SQL statements from a file.
-        
-        Args:
-            sql_file_path: Path to SQL file
-            
-        Returns:
-            True if execution successful, False otherwise
-        """
-        try:
-            self.logger.info(f"Executing SQL file: {sql_file_path}")
-            
-            # Read SQL file
-            with open(sql_file_path, 'r') as file:
-                sql_content = file.read()
-            
-            # Split into individual statements
-            statements = [stmt.strip() for stmt in sql_content.split(';') if stmt.strip()]
-            
-            with self.engine.connect() as conn:
-                trans = conn.begin()
-                try:
-                    for i, statement in enumerate(statements):
-                        if statement:
-                            self.logger.debug(f"Executing statement {i+1}/{len(statements)}")
-                            conn.execute(text(statement))
-                    
-                    trans.commit()
-                    self.logger.info(f"Successfully executed {len(statements)} SQL statements")
-                    return True
-                    
-                except Exception as e:
-                    trans.rollback()
-                    self.logger.error(f"Error executing SQL statement: {e}")
-                    raise
-                    
-        except FileNotFoundError:
-            self.logger.error(f"SQL file not found: {sql_file_path}")
-            return False
-        except Exception as e:
-            self.logger.error(f"Error executing SQL file: {e}")
-            return False
     
-    def create_schema(self) -> bool:
-        """Create the database schema using the DDL script.
-        
-        Returns:
-            True if schema creation successful, False otherwise
-        """
-        ddl_file = "flights_db.sql"
-        self.logger.info("Creating database schema")
-        return self.execute_sql_file(ddl_file)
     
-    def create_views(self) -> bool:
-        """Create analytical views using the views script.
-        
-        Returns:
-            True if view creation successful, False otherwise
-        """
-        views_file = "flights_views.sql"
-        self.logger.info("Creating analytical views")
-        return self.execute_sql_file(views_file)
     
     def check_table_has_data(self, table_name: str) -> bool:
         """Check if a table has any data records.
@@ -349,60 +297,6 @@ class MySQLLoader:
             self.logger.error(f"Error creating lookup table for {dimension_name}: {e}")
             return {}
     
-    def create_indexes(self) -> bool:
-        """Create database indexes for optimal query performance.
-        
-        Returns:
-            True if index creation successful, False otherwise
-        """
-        if not settings.CREATE_INDEXES:
-            self.logger.info("Index creation disabled in configuration")
-            return True
-        
-        self.logger.info("Creating database indexes")
-        
-        # Index definitions (these should match the DDL script)
-        index_statements = [
-            # Drop existing indexes first, then create new ones
-            "DROP INDEX IF EXISTS idx_fact_flights_date ON fact_flights",
-            "CREATE INDEX idx_fact_flights_date ON fact_flights(date_key)",
-            
-            "DROP INDEX IF EXISTS idx_fact_flights_airline ON fact_flights", 
-            "CREATE INDEX idx_fact_flights_airline ON fact_flights(airline_key)",
-            
-            "DROP INDEX IF EXISTS idx_fact_flights_origin ON fact_flights",
-            "CREATE INDEX idx_fact_flights_origin ON fact_flights(origin_airport_key)",
-            
-            "DROP INDEX IF EXISTS idx_fact_flights_destination ON fact_flights",
-            "CREATE INDEX idx_fact_flights_destination ON fact_flights(destination_airport_key)",
-            
-            "DROP INDEX IF EXISTS idx_fact_flights_delay_cause ON fact_flights",
-            "CREATE INDEX idx_fact_flights_delay_cause ON fact_flights(delay_cause_key)",
-            
-            "DROP INDEX IF EXISTS idx_fact_flights_departure_delay ON fact_flights",
-            "CREATE INDEX idx_fact_flights_departure_delay ON fact_flights(departure_delay_minutes)"
-        ]
-        
-        try:
-            with self.engine.connect() as conn:
-                trans = conn.begin()
-                try:
-                    for i, statement in enumerate(index_statements):
-                        self.logger.debug(f"Creating index {i+1}/{len(index_statements)}")
-                        conn.execute(text(statement))
-                    
-                    trans.commit()
-                    self.logger.info(f"Successfully created {len(index_statements)} indexes")
-                    return True
-                    
-                except Exception as e:
-                    trans.rollback()
-                    self.logger.error(f"Error creating indexes: {e}")
-                    return False
-                    
-        except Exception as e:
-            self.logger.error(f"Unexpected error creating indexes: {e}")
-            return False
     
     def get_table_stats(self, table_name: str) -> Dict[str, Any]:
         """Get statistics for a database table.

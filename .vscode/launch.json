@@ -1,0 +1,22 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Attach to ETL",
+      "type": "debugpy",
+      "request": "attach",
+      "connect": { "host": "localhost", "port": 5461 },
+      "justMyCode": true
+    },
+    {
+      "name": "Run ETL (DO NOT USE)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "debugpy",
+      "args": ["--listen", "0.0.0.0:5461", "--wait-for-client", "run_etl.py"],
+      "console": "integratedTerminal",
+      "justMyCode": true
+    }
+  ]
+}
+

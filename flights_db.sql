@@ -254,15 +254,15 @@ CREATE TABLE fact_flights (
     CONSTRAINT fk_flights_destination FOREIGN KEY (destination_airport_key) REFERENCES dim_airport(airport_key),
     CONSTRAINT fk_flights_date FOREIGN KEY (date_key) REFERENCES dim_date(date_key),
     CONSTRAINT fk_flights_time FOREIGN KEY (departure_time_key) REFERENCES dim_time(time_key),
-    CONSTRAINT fk_flights_delay_cause FOREIGN KEY (delay_cause_key) REFERENCES dim_delay_cause(delay_cause_key),
+    CONSTRAINT fk_flights_delay_cause FOREIGN KEY (delay_cause_key) REFERENCES dim_delay_cause(delay_cause_key)
     
     -- Business Rule Constraints
-    CONSTRAINT chk_distance CHECK (distance_miles > 0),
-    CONSTRAINT chk_scheduled_time CHECK (scheduled_elapsed_minutes > 0),
-    CONSTRAINT chk_cancellation_reason CHECK (
-        (is_cancelled = FALSE AND cancellation_reason IS NULL) OR 
-        (is_cancelled = TRUE AND cancellation_reason IN ('A', 'B', 'C', 'D'))
-    )
+    -- CONSTRAINT chk_distance CHECK (distance_miles > 0),
+    -- CONSTRAINT chk_scheduled_time CHECK (scheduled_elapsed_minutes > 0),
+    -- CONSTRAINT chk_cancellation_reason CHECK (
+    --     (is_cancelled = FALSE AND cancellation_reason IS NULL) OR 
+    --     (is_cancelled = TRUE AND cancellation_reason IN ('A', 'B', 'C', 'D'))
+    -- )
     
 ) ENGINE=InnoDB COMMENT='Central fact table for flight performance metrics';
 

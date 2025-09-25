@@ -264,11 +264,13 @@ class CSVExtractor:
             total_rows = sum(1 for _ in open(file_path)) - 1  # Subtract header row
             self.logger.info(f"Total flight records in file: {total_rows:,}")
             
-            # Calculate skip rows for resumption
+            # Calculate skip rows for resumption (preserve header)
             skip_rows = None
             if start_batch > 1:
-                skip_rows = (start_batch - 1) * batch_size + 1  # +1 for header
-                self.logger.info(f"Skipping to row {skip_rows:,} for batch {start_batch}")
+                # Skip only data rows, keep header (row 0)
+                rows_to_skip = (start_batch - 1) * batch_size
+                skip_rows = range(1, rows_to_skip + 1)  # Skip rows 1 to rows_to_skip, keep header
+                self.logger.info(f"Skipping {rows_to_skip:,} data rows for batch {start_batch} (preserving header)")
             
             # Define data types for key columns
             dtype_dict = {

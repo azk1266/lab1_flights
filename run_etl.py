@@ -5,14 +5,12 @@ This script orchestrates the complete ETL process:
 1. Extract data from CSV files
 2. Transform data for dimensional model
 3. Load data into MySQL database
-4. Create indexes and validate data integrity
+4. Validate data integrity
 
 Usage:
     python run_etl.py [options]
     
 Options:
-    --skip-schema: Skip database schema creation
-    --skip-views: Skip analytical views creation
     --skip-validation: Skip data integrity validation
     --sample-size: Process only N flight records (for testing)
     --help: Show this help message
@@ -66,16 +64,12 @@ class FlightDelaysETL:
     
     def run_pipeline(
         self,
-        skip_schema: bool = True,
-        skip_views: bool = True,
         skip_validation: bool = False,
         sample_size: Optional[int] = None
     ) -> bool:
         """Run the complete ETL pipeline.
         
         Args:
-            skip_schema: Skip database schema creation
-            skip_views: Skip analytical views creation
             skip_validation: Skip data integrity validation
             sample_size: Process only N flight records (for testing)
             
@@ -96,8 +90,8 @@ class FlightDelaysETL:
                 return False
             self.progress_logger.log_step("Source file validation completed")
             
-            # Step 2: Setup database connection and schema
-            if not self._setup_database(skip_schema):
+            # Step 2: Setup database connection
+            if not self._setup_database():
                 return False
             self.progress_logger.log_step("Database setup completed")
             
@@ -125,7 +119,7 @@ class FlightDelaysETL:
             self.progress_logger.log_step("Fact data batch processing completed")
             
             # Step 7: Post-load operations
-            if not self._post_load_operations(skip_views, skip_validation):
+            if not self._post_load_operations(skip_validation):
                 return False
             self.progress_logger.log_step("Post-load operations completed")
             
@@ -170,23 +164,14 @@ class FlightDelaysETL:
         self.logger.info("All source files validated successfully")
         return True
     
-    def _setup_database(self, skip_schema: bool) -> bool:
-        """Setup database connection and create schema if needed."""
-        self.logger.info("Setting up database connection and schema")
+    def _setup_database(self) -> bool:
+        """Setup database connection."""
+        self.logger.info("Setting up database connection")
         
         # Connect to database
         if not self.loader.connect():
             self.logger.error("Failed to connect to database")
             return False
-        
-        # Create schema if not skipping
-        if not skip_schema:
-            if not self.loader.create_schema():
-                self.logger.error("Failed to create database schema")
-                return False
-            self.logger.info("Database schema created successfully")
-        else:
-            self.logger.info("Skipping database schema creation")
         
         return True
     
@@ -399,24 +384,11 @@ class FlightDelaysETL:
             self.logger.error(f"Batched flights processing failed: {e}")
             return False
     
-    def _post_load_operations(self, skip_views: bool, skip_validation: bool) -> bool:
-        """Perform post-load operations like indexing and validation."""
+    def _post_load_operations(self, skip_validation: bool) -> bool:
+        """Perform post-load operations like data validation."""
         self.logger.info("Performing post-load operations")
         
         try:
-            # Create indexes
-            if not self.loader.create_indexes():
-                self.logger.warning("Index creation failed, but continuing")
-                self.stats['warnings'].append("Index creation failed")
-            
-            # Create analytical views
-            if not skip_views:
-                if not self.loader.create_views():
-                    self.logger.warning("View creation failed, but continuing")
-                    self.stats['warnings'].append("View creation failed")
-            else:
-                self.logger.info("Skipping analytical views creation")
-            
             # Validate data integrity
             if not skip_validation:
                 validation_results = self.loader.validate_data_integrity()
@@ -508,18 +480,6 @@ def parse_arguments():
     )
     
     parser.add_argument(
-        '--skip-schema',
-        action='store_true',
-        help='Skip database schema creation'
-    )
-    
-    parser.add_argument(
-        '--skip-views',
-        action='store_true',
-        help='Skip analytical views creation'
-    )
-    
-    parser.add_argument(
         '--skip-validation',
         action='store_true',
         help='Skip data integrity validation'
@@ -596,8 +556,6 @@ def main():
     
     # Run the pipeline
     success = etl.run_pipeline(
-        skip_schema=args.skip_schema,
-        skip_views=args.skip_views,
         skip_validation=args.skip_validation,
         sample_size=args.sample_size
     )
