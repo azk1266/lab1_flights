@@ -390,6 +390,29 @@ class FactTransformer:
         df['is_cancelled'] = df['CANCELLED'].astype(bool)
         df['is_diverted'] = df['DIVERTED'].astype(bool)
         
+        # Map cancellation reason codes to full descriptions
+        cancellation_mapping = {
+            'A': 'Airline/Carrier',
+            'B': 'Weather', 
+            'C': 'National Air System',
+            'D': 'Security'
+        }
+        
+        # Process cancellation reason
+        if 'CANCELLATION_REASON' in df.columns:
+            # For cancelled flights, map the code to description
+            # For non-cancelled flights, set to null
+            df['cancellation_reason'] = df.apply(
+                lambda row: cancellation_mapping.get(row['CANCELLATION_REASON'], None) 
+                if row['is_cancelled'] and pd.notna(row['CANCELLATION_REASON']) 
+                else None, 
+                axis=1
+            )
+        else:
+            # If CANCELLATION_REASON column is missing from source, set all to null
+            self.logger.warning("CANCELLATION_REASON column not found in source data, setting all to null")
+            df['cancellation_reason'] = None
+        
         # Weekend flight indicator
         df['is_weekend_flight'] = df['flight_date'].dt.dayofweek.isin([5, 6])  # Saturday = 5, Sunday = 6
         
@@ -427,7 +450,8 @@ class FactTransformer:
             'actual_elapsed_minutes',
             'distance_miles',
             'is_cancelled',
-            'is_diverted'
+            'is_diverted',
+            'cancellation_reason'
         ]
         
         # Ensure all required columns exist

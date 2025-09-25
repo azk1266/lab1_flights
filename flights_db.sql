@@ -215,7 +215,7 @@ CREATE TABLE fact_flights (
     -- Status Flags
     is_cancelled BOOLEAN DEFAULT FALSE,
     is_diverted BOOLEAN DEFAULT FALSE,
-    cancellation_reason VARCHAR(1) NULL COMMENT 'A=Carrier, B=Weather, C=Air System, D=Security',
+    cancellation_reason VARCHAR(50) NULL COMMENT 'Full description: Airline/Carrier, Weather, National Air System, Security',
     
     -- Detailed Delay Breakdown (in minutes) - Only populated when delays occur
     air_system_delay_minutes INT DEFAULT 0,
