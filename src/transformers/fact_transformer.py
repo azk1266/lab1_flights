@@ -76,14 +76,14 @@ class FactTransformer:
         return df
     
     def _clean_flight_data_with_row_logging(self, df: pd.DataFrame, batch_start_row: int) -> pd.DataFrame:
-        """Clean flight data with row-level error logging and filtering.
+        """Clean flight data with imputation instead of dropping rows.
         
         Args:
             df: Raw flights DataFrame batch
             batch_start_row: Starting row number for this batch (for error logging)
             
         Returns:
-            Cleaned DataFrame with problematic rows removed
+            Cleaned DataFrame with missing values imputed
         """
         initial_count = len(df)
         
@@ -96,24 +96,65 @@ class FactTransformer:
             self.logger.error(f"Batch missing entire columns: {missing_columns}")
             return pd.DataFrame()  # Return empty DataFrame if critical columns missing
         
-        # Add row indices for logging
-        df = df.reset_index(drop=True)
+        # Create a copy to work with
+        df_clean = df.copy().reset_index(drop=True)
         
-        # Identify rows with missing critical data
-        missing_mask = df[critical_columns].isnull().any(axis=1)
-        bad_rows_df = df[missing_mask]
+        # Initialize imputation counters for logging
+        imputation_stats = {
+            'year_imputed': 0,
+            'month_imputed': 0,
+            'day_imputed': 0,
+            'airline_imputed': 0,
+            'origin_airport_imputed': 0,
+            'destination_airport_imputed': 0
+        }
         
-        # Log specific problematic rows with detailed information
-        if len(bad_rows_df) > 0:
-            for idx, row in bad_rows_df.iterrows():
-                actual_row_number = batch_start_row + idx
-                missing_cols = [col for col in critical_columns if pd.isnull(row[col])]
-                self.logger.warning(f"Skipping row {actual_row_number:,}: missing critical data in columns {missing_cols}")
+        # Set random seed for reproducible imputation
+        np.random.seed(42)
         
-        # Filter out rows with missing critical data
-        df_clean = df[~missing_mask].copy()
+        # Impute missing YEAR (always set to 2015)
+        year_missing_mask = df_clean['YEAR'].isnull()
+        if year_missing_mask.sum() > 0:
+            df_clean.loc[year_missing_mask, 'YEAR'] = 2015
+            imputation_stats['year_imputed'] = year_missing_mask.sum()
+            self.logger.info(f"Imputed {imputation_stats['year_imputed']} missing YEAR values with 2015")
         
-        # Standardize airline and airport codes for remaining rows
+        # Impute missing MONTH (random 1-12)
+        month_missing_mask = df_clean['MONTH'].isnull()
+        if month_missing_mask.sum() > 0:
+            df_clean.loc[month_missing_mask, 'MONTH'] = np.random.randint(1, 13, size=month_missing_mask.sum())
+            imputation_stats['month_imputed'] = month_missing_mask.sum()
+            self.logger.info(f"Imputed {imputation_stats['month_imputed']} missing MONTH values with random values (1-12)")
+        
+        # Impute missing DAY (random 1-28)
+        day_missing_mask = df_clean['DAY'].isnull()
+        if day_missing_mask.sum() > 0:
+            df_clean.loc[day_missing_mask, 'DAY'] = np.random.randint(1, 29, size=day_missing_mask.sum())
+            imputation_stats['day_imputed'] = day_missing_mask.sum()
+            self.logger.info(f"Imputed {imputation_stats['day_imputed']} missing DAY values with random values (1-28)")
+        
+        # Impute missing AIRLINE (set to 'XX' for unknown)
+        airline_missing_mask = df_clean['AIRLINE'].isnull()
+        if airline_missing_mask.sum() > 0:
+            df_clean.loc[airline_missing_mask, 'AIRLINE'] = 'XX'
+            imputation_stats['airline_imputed'] = airline_missing_mask.sum()
+            self.logger.info(f"Imputed {imputation_stats['airline_imputed']} missing AIRLINE values with 'XX'")
+        
+        # Impute missing ORIGIN_AIRPORT (set to 'UNK' for unknown)
+        origin_missing_mask = df_clean['ORIGIN_AIRPORT'].isnull()
+        if origin_missing_mask.sum() > 0:
+            df_clean.loc[origin_missing_mask, 'ORIGIN_AIRPORT'] = 'UNK'
+            imputation_stats['origin_airport_imputed'] = origin_missing_mask.sum()
+            self.logger.info(f"Imputed {imputation_stats['origin_airport_imputed']} missing ORIGIN_AIRPORT values with 'UNK'")
+        
+        # Impute missing DESTINATION_AIRPORT (set to 'UNK' for unknown)
+        dest_missing_mask = df_clean['DESTINATION_AIRPORT'].isnull()
+        if dest_missing_mask.sum() > 0:
+            df_clean.loc[dest_missing_mask, 'DESTINATION_AIRPORT'] = 'UNK'
+            imputation_stats['destination_airport_imputed'] = dest_missing_mask.sum()
+            self.logger.info(f"Imputed {imputation_stats['destination_airport_imputed']} missing DESTINATION_AIRPORT values with 'UNK'")
+        
+        # Standardize airline and airport codes
         if 'AIRLINE' in df_clean.columns:
             df_clean['AIRLINE'] = df_clean['AIRLINE'].str.strip().str.upper()
         if 'ORIGIN_AIRPORT' in df_clean.columns:
@@ -145,11 +186,10 @@ class FactTransformer:
         if 'DISTANCE' in df_clean.columns:
             df_clean['DISTANCE'] = pd.to_numeric(df_clean['DISTANCE'], errors='coerce').fillna(0)
         
-        cleaned_count = len(df_clean)
-        dropped_count = initial_count - cleaned_count
-        
-        if dropped_count > 0:
-            self.logger.info(f"Row-level filtering: kept {cleaned_count:,}/{initial_count:,} rows, skipped {dropped_count:,} rows with missing data")
+        # Log imputation summary
+        total_imputed = sum(imputation_stats.values())
+        if total_imputed > 0:
+            self.logger.info(f"Data imputation complete: saved {initial_count:,} rows (imputed {total_imputed:,} critical values)")
         
         return df_clean
     
@@ -230,7 +270,7 @@ class FactTransformer:
         return time_series.apply(parse_single_time)
     
     def _add_dimension_keys(self, df: pd.DataFrame, dim_lookups: Dict[str, Dict[str, int]]) -> pd.DataFrame:
-        """Add foreign keys for dimensional tables.
+        """Add foreign keys for dimensional tables using unknown keys for unmapped values.
         
         Args:
             df: Flights DataFrame
@@ -239,37 +279,35 @@ class FactTransformer:
         Returns:
             DataFrame with dimension keys added
         """
+        # Get unknown dimension keys (should be 1 since unknown entries are added first)
+        unknown_airline_key = dim_lookups.get('airlines', {}).get('XX', 1)
+        unknown_airport_key = dim_lookups.get('airports', {}).get('UNK', 1)
+        
         # Airline keys
         if 'airlines' in dim_lookups:
             df['airline_key'] = df['AIRLINE'].map(dim_lookups['airlines'])
             unmapped_airlines = df[df['airline_key'].isna()]['AIRLINE'].nunique()
             if unmapped_airlines > 0:
-                self.logger.warning(f"{unmapped_airlines} unique airlines could not be mapped to dimension")
-            df['airline_key'] = df['airline_key'].fillna(0).astype(int)
+                self.logger.info(f"Mapping {unmapped_airlines} unique unmapped airlines to 'Unknown Airline' (key {unknown_airline_key})")
+            df['airline_key'] = df['airline_key'].fillna(unknown_airline_key).astype(int)
         
-        # Origin airport keys
+        # Origin and destination airport keys
         if 'airports' in dim_lookups:
+            # Origin airport keys
             df['origin_airport_key'] = df['ORIGIN_AIRPORT'].map(dim_lookups['airports'])
-            unmapped_origins = df[df['origin_airport_key'].isna()]['ORIGIN_AIRPORT'].nunique()
-            if unmapped_origins > 0:
-                self.logger.warning(f"{unmapped_origins} unique origin airports could not be mapped")
+            unmapped_origins_count = df[df['origin_airport_key'].isna()].shape[0]
+            unmapped_origins_unique = df[df['origin_airport_key'].isna()]['ORIGIN_AIRPORT'].nunique()
+            if unmapped_origins_count > 0:
+                self.logger.info(f"Mapping {unmapped_origins_count} flights ({unmapped_origins_unique} unique airports) with unmapped origin airports to 'Unknown Airport' (key {unknown_airport_key})")
+            df['origin_airport_key'] = df['origin_airport_key'].fillna(unknown_airport_key).astype(int)
             
             # Destination airport keys
             df['destination_airport_key'] = df['DESTINATION_AIRPORT'].map(dim_lookups['airports'])
-            unmapped_destinations = df[df['destination_airport_key'].isna()]['DESTINATION_AIRPORT'].nunique()
-            if unmapped_destinations > 0:
-                self.logger.warning(f"{unmapped_destinations} unique destination airports could not be mapped")
-            
-            # Remove flights with unmapped airports to maintain referential integrity
-            initial_count = len(df)
-            df = df.dropna(subset=['origin_airport_key', 'destination_airport_key'])
-            removed_count = initial_count - len(df)
-            if removed_count > 0:
-                self.logger.warning(f"Removed {removed_count} flights with unmapped airports")
-            
-            # Convert to int
-            df['origin_airport_key'] = df['origin_airport_key'].astype(int)
-            df['destination_airport_key'] = df['destination_airport_key'].astype(int)
+            unmapped_dest_count = df[df['destination_airport_key'].isna()].shape[0]
+            unmapped_dest_unique = df[df['destination_airport_key'].isna()]['DESTINATION_AIRPORT'].nunique()
+            if unmapped_dest_count > 0:
+                self.logger.info(f"Mapping {unmapped_dest_count} flights ({unmapped_dest_unique} unique airports) with unmapped destination airports to 'Unknown Airport' (key {unknown_airport_key})")
+            df['destination_airport_key'] = df['destination_airport_key'].fillna(unknown_airport_key).astype(int)
         
         # Time keys - convert HH:MM to HH:MM:00 format for lookup
         if 'times' in dim_lookups:
@@ -277,8 +315,8 @@ class FactTransformer:
             df['departure_time_key'] = df['departure_time_full'].map(dim_lookups['times'])
             unmapped_times = df[df['departure_time_key'].isna()]['departure_time_string'].nunique()
             if unmapped_times > 0:
-                self.logger.warning(f"{unmapped_times} unique departure times could not be mapped")
-            df['departure_time_key'] = df['departure_time_key'].fillna(0).astype(int)
+                self.logger.info(f"Mapping {unmapped_times} unique unmapped departure times to default time slot (key 1)")
+            df['departure_time_key'] = df['departure_time_key'].fillna(1).astype(int)  # Default to first time slot (00:00:00)
         
         return df
     
@@ -295,9 +333,47 @@ class FactTransformer:
         df['departure_delay_minutes'] = df['DEPARTURE_DELAY'].fillna(0)
         df['arrival_delay_minutes'] = df['ARRIVAL_DELAY'].fillna(0)
         
+        # Map CSV delay cause columns to database column names
+        df['air_system_delay_minutes'] = pd.to_numeric(df['AIR_SYSTEM_DELAY'], errors='coerce').fillna(0).astype(int)
+        df['security_delay_minutes'] = pd.to_numeric(df['SECURITY_DELAY'], errors='coerce').fillna(0).astype(int)
+        df['airline_delay_minutes'] = pd.to_numeric(df['AIRLINE_DELAY'], errors='coerce').fillna(0).astype(int)
+        df['late_aircraft_delay_minutes'] = pd.to_numeric(df['LATE_AIRCRAFT_DELAY'], errors='coerce').fillna(0).astype(int)
+        df['weather_delay_minutes'] = pd.to_numeric(df['WEATHER_DELAY'], errors='coerce').fillna(0).astype(int)
+        
+        # Note: Missing values in delay cause columns are silently filled with 0
+        
         # Calculate scheduled and actual elapsed time
         df['scheduled_elapsed_minutes'] = df['SCHEDULED_TIME'].fillna(0)
         df['actual_elapsed_minutes'] = df['ELAPSED_TIME'].fillna(0)
+        
+        # Transform taxi and air time columns
+        df['taxi_out_minutes'] = pd.to_numeric(df['TAXI_OUT'], errors='coerce').fillna(0).astype(int)
+        df['taxi_in_minutes'] = pd.to_numeric(df['TAXI_IN'], errors='coerce').fillna(0).astype(int)
+        df['air_time_minutes'] = pd.to_numeric(df['AIR_TIME'], errors='coerce').fillna(0).astype(int)
+        
+        # Log data quality for taxi and air time columns
+        taxi_out_missing = df['TAXI_OUT'].isna().sum() if 'TAXI_OUT' in df.columns else len(df)
+        taxi_in_missing = df['TAXI_IN'].isna().sum() if 'TAXI_IN' in df.columns else len(df)
+        air_time_missing = df['AIR_TIME'].isna().sum() if 'AIR_TIME' in df.columns else len(df)
+        
+        if taxi_out_missing > 0:
+            self.logger.info(f"TAXI_OUT: {taxi_out_missing:,}/{len(df):,} records have missing values, filled with 0")
+        if taxi_in_missing > 0:
+            self.logger.info(f"TAXI_IN: {taxi_in_missing:,}/{len(df):,} records have missing values, filled with 0")
+        if air_time_missing > 0:
+            self.logger.info(f"AIR_TIME: {air_time_missing:,}/{len(df):,} records have missing values, filled with 0")
+        
+        # Validate reasonable ranges for taxi and air time
+        extreme_taxi_out = (df['taxi_out_minutes'] > 180).sum()  # More than 3 hours taxi out
+        extreme_taxi_in = (df['taxi_in_minutes'] > 120).sum()    # More than 2 hours taxi in
+        extreme_air_time = (df['air_time_minutes'] > 600).sum()  # More than 10 hours air time
+        
+        if extreme_taxi_out > 0:
+            self.logger.warning(f"Found {extreme_taxi_out} flights with taxi out time > 180 minutes")
+        if extreme_taxi_in > 0:
+            self.logger.warning(f"Found {extreme_taxi_in} flights with taxi in time > 120 minutes")
+        # if extreme_air_time > 0:
+        #     self.logger.warning(f"Found {extreme_air_time} flights with air time > 600 minutes")
         
         # Distance in miles
         df['distance_miles'] = df['DISTANCE'].fillna(0)
@@ -448,7 +524,15 @@ class FactTransformer:
             'arrival_delay_minutes',
             'scheduled_elapsed_minutes',
             'actual_elapsed_minutes',
+            'taxi_out_minutes',
+            'taxi_in_minutes',
+            'air_time_minutes',
             'distance_miles',
+            'air_system_delay_minutes',
+            'security_delay_minutes',
+            'airline_delay_minutes', 
+            'late_aircraft_delay_minutes',
+            'weather_delay_minutes',
             'is_cancelled',
             'is_diverted',
             'cancellation_reason'

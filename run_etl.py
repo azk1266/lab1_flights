@@ -442,7 +442,7 @@ class FlightDelaysETL:
         self.logger.info("=" * 50)
         self.logger.info("ETL PIPELINE SUMMARY REPORT")
         self.logger.info("=" * 50)
-        self.logger.info(f"Total execution time: {total_time:.2f} seconds")
+        # self.logger.info(f"Total execution time: {total_time:.2f} seconds")
         self.logger.info(f"Flights processed: {self.stats['total_flights_processed']:,}")
         self.logger.info(f"Total records loaded: {self.stats['total_records_loaded']:,}")
         

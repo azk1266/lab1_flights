@@ -44,14 +44,21 @@ class DimensionTransformer:
         # Create airline type categorization based on airline name patterns
         df['airline_type'] = self._categorize_airline_type(df['airline_name'])
         
-        # Add surrogate key (will be handled by database auto-increment)
-        # Reset index to ensure clean sequential numbering
-        df = df.reset_index(drop=True)
+        # Add "unknown" airline as the first record to ensure consistent key assignment
+        # Use "XX" to fit the 2-character airline_code constraint
+        unknown_airline = pd.DataFrame({
+            'airline_code': ['XX'],
+            'airline_name': ['Unknown Airline'],
+            'airline_type': ['Unknown']
+        })
+        
+        # Concatenate unknown airline at the beginning
+        df = pd.concat([unknown_airline, df], ignore_index=True)
         
         # Select and order columns for dimensional model
         df = df[['airline_code', 'airline_name', 'airline_type']]
         
-        self.logger.info(f"Transformed {len(df)} airline records")
+        self.logger.info(f"Transformed {len(df)} airline records (including 1 unknown airline)")
         return df
     
     def transform_airports(self, airports_df: pd.DataFrame) -> pd.DataFrame:
@@ -96,8 +103,21 @@ class DimensionTransformer:
         # Add airport size categorization (placeholder - would need flight volume data)
         df['airport_size_category'] = 'Medium'  # Default, could be enhanced later
         
-        # Reset index to ensure clean sequential numbering
-        df = df.reset_index(drop=True)
+        # Add "unknown" airport as the first record to ensure consistent key assignment
+        unknown_airport = pd.DataFrame({
+            'airport_code': ['UNK'],
+            'airport_name': ['Unknown Airport'],
+            'city': ['Unknown'],
+            'state': ['XX'],  # Use 2-char code to fit varchar(2) constraint
+            'country': ['Unknown'],
+            'latitude': [0.0],
+            'longitude': [0.0],
+            'timezone': ['America/New_York'],
+            'airport_size_category': ['Unknown']
+        })
+        
+        # Concatenate unknown airport at the beginning
+        df = pd.concat([unknown_airport, df], ignore_index=True)
         
         # Select and order columns for dimensional model
         columns = [
@@ -106,7 +126,7 @@ class DimensionTransformer:
         ]
         df = df[columns]
         
-        self.logger.info(f"Transformed {len(df)} airport records")
+        self.logger.info(f"Transformed {len(df)} airport records (including 1 unknown airport)")
         return df
     
     def create_date_dimension(self, start_date: str = '2015-01-01', end_date: str = '2015-12-31') -> pd.DataFrame:

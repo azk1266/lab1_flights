@@ -40,8 +40,8 @@ class BatchStateManager:
                 self.logger.info("Creating new state")
         
         # Create new state
-        return self._create_new_state()
-    
+        return self._create_new_state() 
+      
     def _create_new_state(self) -> Dict:
         """Create a new state dictionary.
         

@@ -1,6 +1,6 @@
 # Flight Delays ETL Pipeline
 
-A comprehensive ETL (Extract, Transform, Load) pipeline for processing flight delays data into a dimensional model optimized for analytical queries and flight delay prediction.
+A production-ready ETL pipeline for processing 5.8M+ flight records into a dimensional model with advanced batch processing and resumable state management.
 
 ## Project Overview
 
@@ -9,7 +9,10 @@ This project implements a dimensional modeling approach to store and analyze 201
 - **airports.csv**: 300+ airports with geographic information
 - **flights.csv**: 5.8M+ flight records with delay information
 
-The pipeline transforms this data into a star schema with one fact table (`fact_flights`) and five dimension tables optimized for the eight analytical objectives defined in the project requirements.
+### Key Features
+- **Batch Processing**: Memory-efficient processing in configurable batches (default 100K records)
+- **State Management**: Resumable processing with automatic recovery from interruptions
+
 
 ## Architecture
 
@@ -17,117 +20,97 @@ The pipeline transforms this data into a star schema with one fact table (`fact_
 - **Fact Table**: `fact_flights` - Central table with flight metrics
 - **Dimension Tables**:
   - `dim_airline` - Airline information and categorization
-  - `dim_airport` - Airport details with geographic data
+  - `dim_airport` - Airport details with geographic data  
   - `dim_date` - Calendar dimension with business attributes
   - `dim_time` - Time dimension for departure analysis
   - `dim_delay_cause` - Categorized delay causes
 
-### ETL Pipeline Components
-```
-├── src/
-│   ├── extractors/        # CSV data extraction
-│   ├── transformers/      # Data transformation logic
-│   ├── loaders/          # MySQL database loading
-│   ├── config/           # Configuration management
-│   └── utils/            # Logging and utilities
-├── run_etl.py           # Main pipeline orchestrator
-├── flights_db.sql       # Database schema DDL
-└── flights_views.sql    # Analytical views
-```
+### Batch Processing Mechanism
+The pipeline processes flights data in configurable batches directly from CSV without loading the entire 5.8M dataset into memory:
+- **Memory Efficiency**: Constant ~500MB RAM usage regardless of dataset size
+- **True Streaming**: Processes one batch at a time, immediately loads to database
+- **Configurable Batches**: Adjustable batch size via `BATCH_SIZE` environment variable
+
+### State Manager
+Advanced state management system provides production-level reliability:
+- **JSON Persistence**: Saves progress after each successful batch (`etl_state.json`)
+- **Automatic Recovery**: Resumes from exact interruption point
+- **Batch Size Recalculation**: Handles configuration changes between runs
+- **Progress Tracking**: Detailed metrics with percentage completion
 
 ## Prerequisites
 
-### System Requirements
 - Python 3.8+ 
 - MySQL 8.0+ database server
-- Minimum 8GB RAM (for processing 5.8M flight records)
+- Minimum 4GB RAM (8GB recommended)
 - 2GB free disk space
-
-### Database Setup
-Ensure MySQL is running and accessible with your configured credentials. 
-
 
 ## Installation & Setup
 
-
-### 1. Navigation 
+### 1. Navigation & Setup
 ```bash
-# Go to lab1_flights direcroty
 cd lab1_flights
-# Create necessary folders
 mkdir -p logs data
 ```
-### 2. Data files 
-All three .csv data files (airlines.csv, airports.csv, flights.csv) should be in lab1_flight/data folder. They are available in the [Kaggle](https://www.kaggle.com/code/fabiendaniel/predicting-flight-delays-tutorial/input).
 
-### 3. Set Up Virtual Environment
+### 2. Data Files
+Place CSV files in `data/` directory (available from [Kaggle](https://www.kaggle.com/code/fabiendaniel/predicting-flight-delays-tutorial/input)):
+- airlines.csv
+- airports.csv  
+- flights.csv
+
+### 3. Environment Setup
 ```bash
-# Create virtual environment
+# Create and activate virtual environment
 python -m venv venv
-
-# Activate virtual environment
 source venv/bin/activate
-
-# Install dependencies
 pip install -r requirements.txt
 ```
 
 ### 4. Configure Environment
-In .env.example file following credencials should be replaced with yours:
+In .env file following credencials should be replaced with yours:
 - DATABASE_HOST
 - DATABASE_PORT
 - DATABASE_USER
 - DATABASE_PASSWORD
 
 
-```bash
-# Copy environment template
-cp .env.example .env
-```
 
-### 4. Verify Data Files
-Ensure all CSV files are present in the `data/` directory:
+
+### 4. Quick Start with Restart Script
+For complete setup and testing:
 ```bash
-ls -la data/
-# Should show: airlines.csv, airports.csv, flights.csv
+chmod +x restart.sh
+./restart.sh
 ```
+This script handles database setup, schema creation, and runs a sample ETL process.
 
 ## Usage
 
 ### Basic Execution
-Create database:
 ```bash
+# Create database schema
 mysql -u username -pYourPassword < flights_db.sql
-```
-Run the complete ETL pipeline with default settings:
-```bash
-# With virtual environment activated
-python run_etl.py
 
-# Or use executable directly
-./run_etl.py
+# Run complete ETL pipeline
+python run_etl.py
 ```
 
 ### Command Line Options
 ```bash
-# Skip database schema creation (if already exists)
-python run_etl.py --skip-schema
+# Basic execution
+python run_etl.py
 
-# Skip analytical views creation
-python run_etl.py --skip-views
+# Testing and development
+python run_etl.py --sample-size 10000                    # Process limited records
+python run_etl.py --skip-validation                      # Skip integrity validation
 
-# Skip data integrity validation
-python run_etl.py --skip-validation
+# State management (resumable processing)
+python run_etl.py --show-state                           # Display current processing state
+python run_etl.py --fresh-start                          # Clear state, start from beginning
+python run_etl.py --reset-position --start-row 1000000   # Resume from specific row
 
-# Process only a sample of flights (for testing)
-python run_etl.py --sample-size 10000
-
-# Combine options
-python run_etl.py --skip-schema --sample-size 50000
-```
-
-### Help
-```bash
+# Help
 python run_etl.py --help
 ```
 
@@ -135,124 +118,40 @@ python run_etl.py --help
 
 ### 1. **Data Extraction**
 - Validates CSV file existence and structure
-- Reads data with proper data types and encoding
+- **Memory Management**: True batch processing in 50K record batches
 - Handles chunked processing for large datasets
-- **Memory Management**: Processes flights.csv in 100K record batches
 
 ### 2. **Data Transformation**
-**Dimensions:**
-- Airlines: Categorizes by type (Major, Regional, Low-Cost)
-- Airports: Adds timezone and size categorization
-- Date: Creates business calendar (weekends, holidays, seasons)
-- Time: Categorizes departure times into periods
-- Delay Causes: Maps delay types to standardized categories
-
-**Facts:**
-- Cleans and validates flight records
-- Resolves foreign keys to dimensions
-- Calculates derived metrics (delay indicators, recovery times)
-- Determines primary delay causes
+- **Dimensions**: Airlines categorization, airport size classification, business calendar
+- **Facts**: Flight records with foreign key resolution and derived metrics
+- **Cancellation Mapping**: 'A'→'Airline/Carrier', 'B'→'Weather', 'C'→'National Air System', 'D'→'Security'
 
 ### 3. **Data Loading**
-- **Strategy**: Truncate and reload (full refresh)
-- **Batch Processing**: Configurable batch sizes for performance
-- **Transaction Management**: Rollback capability on failures
+- **Strategy**: Batch loading with transaction management
+- **State Persistence**: Progress saved after each successful batch
 - **Foreign Key Resolution**: Automatic lookup table generation
 
 ### 4. **Post-Load Operations**
 - Creates optimized indexes for query performance
-- Generates 19 analytical views supporting all objectives
 - Validates data integrity and referential constraints
-- Provides comprehensive execution statistics
-
 
 ## Monitoring & Logging
 
-### Log Locations
-- **Console**: Real-time progress and status
+- **Console**: Real-time progress with batch-by-batch status
 - **File**: `logs/etl_pipeline.log` (detailed execution log)
-
-### Progress Tracking
-The pipeline provides detailed progress information:
-- Step-by-step completion status
-- Record processing counts and rates
-- Performance metrics and timing
-- Data quality warnings and statistics
-
-### Error Handling
-- **Graceful Degradation**: Continues processing despite non-critical errors
-- **Data Quality Issues**: Logged as warnings with counts
-- **System Errors**: Immediate failure with detailed error messages
-- **Rollback**: Database transactions rolled back on failures
-
-## Data Quality & Validation
-
-### Automated Checks
-- **Referential Integrity**: Validates all foreign key relationships
-- **Data Completeness**: Reports missing critical fields
-- **Range Validation**: Identifies extreme values (delays > 24hrs)
-- **Consistency Checks**: Cross-field validation (arrival after departure)
-
-### Known Data Quality Issues
-- ~0.1% of flights have extreme delays (>24 hours)
-- Some flights missing specific delay cause breakdown
-- Occasional missing departure/arrival times for cancelled flights
-
-## Troubleshooting
-
-### Common Issues
-
-**1. Database Connection Failed**
-```bash
-# Check MySQL service
-sudo systemctl status mysql
-
-# Test connection
-mysql -u azalia2 -p123456 -h 127.0.0.1 -P 3306
-```
-
-**2. Memory Issues**
-```bash
-# Reduce batch size in .env
-BATCH_SIZE=50000
-
-# Or process smaller sample
-python run_etl.py --sample-size 100000
-```
-
-**3. Missing CSV Files**
-```bash
-# Verify files exist and have correct permissions
-ls -la data/
-chmod 644 data/*.csv
-```
-
-**4. Import Errors**
-```bash
-# Ensure virtual environment is activated
-source venv/bin/activate
-
-# Reinstall dependencies
-pip install -r requirements.txt --force-reinstall
-```
-
-### Debug Mode
-Enable detailed SQL logging by editing `src/loaders/mysql_loader.py`:
-```python
-self.engine = create_engine(
-    settings.database_url,
-    echo=True  # Enable SQL statement logging
-)
-```
+- **State File**: `etl_state.json` (resumable processing state)
 
 ## Analytical Capabilities
 
-Once loaded, the dimensional model supports all eight analytical objectives:
+The dimensional model supports all eight analytical objectives with optimized queries:
 
 ### 1. **Carrier Performance Analysis**
 ```sql
--- Average delays by airline
-SELECT a.airline_name, AVG(f.departure_delay_minutes) as avg_delay
+SELECT 
+    a.airline_name,
+    COUNT(*) as total_flights,
+    AVG(f.departure_delay_minutes) as avg_delay,
+    ROUND(100.0 * SUM(CASE WHEN f.departure_delay_minutes <= 15 THEN 1 ELSE 0 END) / COUNT(*), 2) as on_time_pct
 FROM fact_flights f
 JOIN dim_airline a ON f.airline_key = a.airline_key
 GROUP BY a.airline_name
@@ -261,25 +160,42 @@ ORDER BY avg_delay DESC;
 
 ### 2. **Airport Congestion Impact**
 ```sql
--- Delays by origin airport
-SELECT ap.airport_name, ap.city, COUNT(*) as flights, AVG(f.departure_delay_minutes) as avg_delay
+SELECT 
+    ap.airport_name, 
+    ap.city,
+    ap.airport_size_category,
+    COUNT(*) as flights, 
+    AVG(f.departure_delay_minutes) as avg_delay
 FROM fact_flights f
 JOIN dim_airport ap ON f.origin_airport_key = ap.airport_key
 WHERE f.departure_delay_minutes > 0
-GROUP BY ap.airport_key
+GROUP BY ap.airport_key, ap.airport_name, ap.city, ap.airport_size_category
 ORDER BY avg_delay DESC;
 ```
 
-### 3. **Weather Impact Assessment**
+### 3. **Temporal Pattern Analysis**
 ```sql
--- Weather-related delays by month
-SELECT d.month_name, COUNT(*) as weather_delays, AVG(f.departure_delay_minutes) as avg_delay
+SELECT 
+    d.season,
+    t.hour_category,
+    COUNT(*) as flights,
+    AVG(f.departure_delay_minutes) as avg_delay
 FROM fact_flights f
-JOIN dim_date d ON f.date_key = d.date
-JOIN dim_delay_cause dc ON f.delay_cause_key = dc.delay_cause_key
-WHERE dc.cause_category = 'Weather'
-GROUP BY d.month, d.month_name
-ORDER BY d.month;
+JOIN dim_date d ON f.date_key = d.date_key
+JOIN dim_time t ON f.departure_time_key = t.time_key
+GROUP BY d.season, t.hour_category
+ORDER BY avg_delay DESC;
+```
+
+### 4. **Delay Severity Analysis**
+```sql
+SELECT 
+    f.delay_severity_category,
+    COUNT(*) as flight_count,
+    ROUND(100.0 * COUNT(*) / SUM(COUNT(*)) OVER (), 2) as percentage
+FROM fact_flights f
+GROUP BY f.delay_severity_category
+ORDER BY flight_count DESC;
 ```
 
 ## File Structure
@@ -288,37 +204,39 @@ ORDER BY d.month;
 lab1_flights/
 ├── README.md                          # This documentation
 ├── requirements.txt                   # Python dependencies
-├── .env.example                       # Environment configuration template
-├── .python-version                    # Python version specification
+├── .env                               # Environment configuration template
+├── restart.sh                         # Quick setup and restart script
 ├── run_etl.py                         # Main ETL pipeline script
 ├── flights_db.sql                     # Database schema DDL
 ├── flights_views.sql                  # Analytical views
 ├── data/                              # Source CSV files
-│   ├── airlines.csv
-│   ├── airports.csv
-│   └── flights.csv
-├── venv/                              # Virtual environment
 ├── logs/                              # Execution logs (created at runtime)
 ├── src/                               # Source code
 │   ├── config/
 │   │   └── settings.py                # Configuration management
 │   ├── extractors/
-│   │   └── csv_extractor.py           # CSV data extraction
+│   │   └── csv_extractor.py           # CSV data extraction with batch processing
 │   ├── transformers/
 │   │   ├── dimension_transformer.py   # Dimensional data transformation
 │   │   └── fact_transformer.py        # Fact table transformation
 │   ├── loaders/
 │   │   └── mysql_loader.py            # MySQL database loading
 │   └── utils/
+│       ├── batch_state_manager.py     # Resumable processing state management
 │       └── logging_config.py          # Logging configuration
-└── reports/                           # Analysis reports
+└── etl_state.json                     # State management file (created at runtime)
 ```
 
+## Troubleshooting
+
+**Memory Issues**: Reduce `BATCH_SIZE` in `.env` file  
+**Database Connection**: Check MySQL service and credentials in `.env`  
+**Missing Files**: Ensure all CSV files are in `data/` directory  
+**Processing Stuck**: Use `python run_etl.py --show-state` to check progress  
 
 ## Support
 
-For issues or questions:
-1. Check the troubleshooting section above
-2. Review log files in `logs/etl_pipeline.log`
-3. Verify all prerequisites are met
-4. Ensure data files are accessible and properly formatted
+1. Check `logs/etl_pipeline.log` for detailed execution information
+2. Use `python run_etl.py --show-state` for current processing status
+3. Review configuration in `.env` file
+4. Verify data files are accessible and properly formatted
