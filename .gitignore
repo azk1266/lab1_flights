@@ -1,4 +1,4 @@
-.env
+.env.example
 etl_state.json
 memory-bank/
 data/*.csv
@@ -7,3 +7,4 @@ logs/*.log
 __pycache__
 */__pycache__
 venv/
+reports/final_report.md

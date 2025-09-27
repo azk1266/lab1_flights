@@ -77,7 +77,7 @@ In .env file following credencials should be replaced with yours:
 
 
 
-### 4. Quick Start with Restart Script
+### 5. Quick Start with Restart Script
 For complete setup and testing:
 ```bash
 chmod +x restart.sh
